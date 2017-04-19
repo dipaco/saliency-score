@@ -19,6 +19,7 @@ class BOV:
         self.train_labels = np.array([])
         self.name_dict = {}
         self.descriptor_list = []
+        self.num_keypoints_by_image = np.array([], dtype=int)
 
     def trainModel(self):
         """
@@ -33,26 +34,49 @@ class BOV:
         self.images, self.trainImageCount = self.file_helper.getFiles(self.train_path)
         # extract SIFT Features from each image
         label_count = 0
+        self.descriptor_list = None
         for word, imlist in self.images.iteritems():
+            word_descriptor_list = None
             self.name_dict[str(label_count)] = word
-            print "Computing Features for ", word
+            print label_count + 1, " Computing Features for ", word
+            image_count = 0
             for im in imlist:
                 # cv2.imshow("im", im)
                 # cv2.waitKey()
+
                 self.train_labels = np.append(self.train_labels, label_count)
                 kp, des = self.im_helper.features(im)
-                self.descriptor_list.append(des)
+                self.num_keypoints_by_image = np.append(self.num_keypoints_by_image, len(kp))
+
+                # Sometimes no keypoints or features can be extracted from the image
+                if des is not None:
+                    # By using word_descriptor_list the efficiency is improved since
+                    # the concatenation of all descriptors is made faster
+                    if word_descriptor_list is None:
+                        word_descriptor_list = des
+                    else:
+                        word_descriptor_list = np.vstack((word_descriptor_list, des))
+                    #self.descriptor_list.append(des)
+                else:
+                    print ' - Image ', image_count, ' in category ', word, ' coudln\'t be read.'
+                image_count += 1
+
+            if self.descriptor_list is None:
+                self.descriptor_list = word_descriptor_list
+            else:
+                self.descriptor_list = np.vstack((self.descriptor_list, word_descriptor_list))
 
             label_count += 1
 
         # perform clustering
-        bov_descriptor_stack = self.bov_helper.formatND(self.descriptor_list)
+        print "Clustering descriptors"
+        #bov_descriptor_stack = self.bov_helper.formatND(self.descriptor_list)
+        self.bov_helper.descriptor_vstack = self.descriptor_list
         self.bov_helper.cluster()
-        self.bov_helper.developVocabulary(n_images=self.trainImageCount, descriptor_list=self.descriptor_list)
+        self.bov_helper.developVocabulary(n_images=self.trainImageCount, descriptor_list=self.descriptor_list, keypoints_by_image=self.num_keypoints_by_image)
 
         # show vocabulary trained
         # self.bov_helper.plotHist()
-
 
         self.bov_helper.standardize()
         self.bov_helper.train(self.train_labels)

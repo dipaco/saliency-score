@@ -36,7 +36,7 @@ class BOVHelpers:
         """
         self.kmeans_ret = self.kmeans_obj.fit_predict(self.descriptor_vstack)
 
-    def developVocabulary(self, n_images, descriptor_list, kmeans_ret=None):
+    def developVocabulary(self, n_images, descriptor_list, keypoints_by_image, kmeans_ret=None):
 
         """
         Each cluster denotes a particular visual word
@@ -52,7 +52,7 @@ class BOVHelpers:
         self.mega_histogram = np.array([np.zeros(self.n_clusters) for i in range(n_images)])
         old_count = 0
         for i in range(n_images):
-            l = len(descriptor_list[i])
+            l = keypoints_by_image[i]
             for j in range(l):
                 if kmeans_ret is None:
                     idx = self.kmeans_ret[old_count + j]
@@ -84,8 +84,11 @@ class BOVHelpers:
 
         """
         vStack = np.array(l[0])
+        i = 0
         for remaining in l:
+            print i
             vStack = np.vstack((vStack, remaining))
+            i += 1
         self.descriptor_vstack = vStack.copy()
         return vStack
 
@@ -143,7 +146,7 @@ class FileHelpers:
             print " #### Reading image category ", word, " ##### "
             count_1 = 0
             imlist[word] = []
-            for imagefile in glob(path + word + "/*"):
+            for imagefile in glob(path + word + "/*[!.db]"):
                 # print "Reading file ", imagefile
                 im = cv2.imread(imagefile, 0)
                 imlist[word].append(im)
