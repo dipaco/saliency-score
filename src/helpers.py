@@ -9,7 +9,10 @@ from matplotlib import pyplot as plt
 
 class ImageHelpers:
     def __init__(self):
-        self.sift_object = cv2.SIFT()
+        if cv2.__version__.startswith('2'):
+            self.sift_object = cv2.SIFT()
+        else:
+            self.sift_object = cv2.FeatureDetector_create('SIFT')
 
     def gray(self, image):
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
