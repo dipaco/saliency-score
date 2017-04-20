@@ -102,9 +102,9 @@ class BOVHelpers:
 
         """
         print "Training SVM"
-        print self.clf
         print "Train labels", train_labels
         self.clf.fit(self.mega_histogram, train_labels)
+        print self.clf
         print "Training completed"
 
     def predict(self, iplist):

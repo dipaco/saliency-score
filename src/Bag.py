@@ -56,7 +56,6 @@ class BOV:
                         word_descriptor_list = des
                     else:
                         word_descriptor_list = np.vstack((word_descriptor_list, des))
-                    #self.descriptor_list.append(des)
                 else:
                     print ' - Image ', image_count, ' in category ', word, ' coudln\'t be read.'
                 image_count += 1
@@ -73,7 +72,10 @@ class BOV:
         #bov_descriptor_stack = self.bov_helper.formatND(self.descriptor_list)
         self.bov_helper.descriptor_vstack = self.descriptor_list
         self.bov_helper.cluster()
-        self.bov_helper.developVocabulary(n_images=self.trainImageCount, descriptor_list=self.descriptor_list, keypoints_by_image=self.num_keypoints_by_image)
+        self.bov_helper.developVocabulary(
+            n_images=self.trainImageCount,
+            descriptor_list=self.descriptor_list,
+            keypoints_by_image=self.num_keypoints_by_image)
 
         # show vocabulary trained
         # self.bov_helper.plotHist()
@@ -93,7 +95,7 @@ class BOV:
         kp, des = self.im_helper.features(test_img)
 
         # generate vocab for test image
-        vocab = np.array([0 for i in range(self.no_clusters)])
+        vocab = np.zeros((1, self.no_clusters))
         # locate nearest clusters for each of 
         # the visual word (feature) present in the image
 
@@ -101,7 +103,7 @@ class BOV:
         test_ret = self.bov_helper.kmeans_obj.predict(des)
 
         for each in test_ret:
-            vocab[each] += 1
+            vocab[0, each] += 1
 
         # Scale the features
         vocab = self.bov_helper.scale.transform(vocab)
