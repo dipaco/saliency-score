@@ -20,6 +20,7 @@ class BOV:
         self.name_dict = {}
         self.descriptor_list = []
         self.num_keypoints_by_image = np.array([], dtype=int)
+        self.saliency_list = []
 
     def trainModel(self):
         """
@@ -37,6 +38,7 @@ class BOV:
         self.descriptor_list = None
         for word, imlist in self.images.iteritems():
             word_descriptor_list = None
+            word_saliency_list = None
             self.name_dict[str(label_count)] = word
             print label_count + 1, " Computing Features for ", word
             image_count = 0
@@ -46,6 +48,7 @@ class BOV:
 
                 self.train_labels = np.append(self.train_labels, label_count)
                 kp, des = self.im_helper.features(im)
+                sal = self.im_helper.saliency(image=im, keypoints=kp)
                 self.num_keypoints_by_image = np.append(self.num_keypoints_by_image, len(kp))
 
                 # Sometimes no keypoints or features can be extracted from the image
@@ -54,16 +57,20 @@ class BOV:
                     # the concatenation of all descriptors is made faster
                     if word_descriptor_list is None:
                         word_descriptor_list = des
+                        word_saliency_list = sal
                     else:
                         word_descriptor_list = np.vstack((word_descriptor_list, des))
+                        word_saliency_list = np.vstack((word_saliency_list, sal))
                 else:
                     print ' - Image ', image_count, ' in category ', word, ' coudln\'t be read.'
                 image_count += 1
 
             if self.descriptor_list is None:
                 self.descriptor_list = word_descriptor_list
+                self.saliency_list = word_saliency_list
             else:
                 self.descriptor_list = np.vstack((self.descriptor_list, word_descriptor_list))
+                self.saliency_list = np.vstack((self.saliency_list, word_saliency_list))
 
             label_count += 1
 
@@ -74,14 +81,14 @@ class BOV:
         self.bov_helper.cluster()
         self.bov_helper.developVocabulary(
             n_images=self.trainImageCount,
-            descriptor_list=self.descriptor_list,
+            saliency_list=self.saliency_list,
             keypoints_by_image=self.num_keypoints_by_image)
 
         # show vocabulary trained
         # self.bov_helper.plotHist()
 
         self.bov_helper.standardize()
-        self.bov_helper.train(self.train_labels)
+        self.bov_helper.train(self.train_labels, num_features=100)
 
     def recognize(self, test_img, test_image_path=None):
 
@@ -107,6 +114,9 @@ class BOV:
 
         # Scale the features
         vocab = self.bov_helper.scale.transform(vocab)
+
+        # Apply feature selection
+        vocab = vocab[:, self.bov_helper.feature_selection]
 
         # predict the class of the image
         lb = self.bov_helper.clf.predict(vocab)

@@ -4,6 +4,7 @@ from glob import glob
 from sklearn.cluster import KMeans
 from sklearn.svm import SVC
 from sklearn.preprocessing import StandardScaler
+from scipy.stats import entropy
 from matplotlib import pyplot as plt
 
 
@@ -22,6 +23,10 @@ class ImageHelpers:
         keypoints, descriptors = self.sift_object.detectAndCompute(image, None)
         return [keypoints, descriptors]
 
+    def saliency(self, image, keypoints):
+        # TODO: Implement this
+        return np.random.rand(len(keypoints), 1)
+
 
 class BOVHelpers:
     def __init__(self, n_clusters=20):
@@ -30,6 +35,8 @@ class BOVHelpers:
         self.kmeans_ret = None
         self.descriptor_vstack = None
         self.mega_histogram = None
+        self.saliency_score = np.zeros(n_clusters)
+        self.feature_selection = np.array([])
         self.clf = SVC()
 
     def cluster(self):
@@ -39,7 +46,7 @@ class BOVHelpers:
         """
         self.kmeans_ret = self.kmeans_obj.fit_predict(self.descriptor_vstack)
 
-    def developVocabulary(self, n_images, descriptor_list, keypoints_by_image, kmeans_ret=None):
+    def developVocabulary(self, n_images, saliency_list, keypoints_by_image, kmeans_ret=None):
 
         """
         Each cluster denotes a particular visual word
@@ -50,9 +57,12 @@ class BOVHelpers:
         Thus the vocabulary comprises of a set of histograms of encompassing
         all descriptions for all images
 
+        Also the saliency score for every cluster is calculated based on teh saliency of
+        each keypoint.
         """
 
         self.mega_histogram = np.array([np.zeros(self.n_clusters) for i in range(n_images)])
+        cluster_saliencies = [np.array([]) for i in range(self.n_clusters)]
         old_count = 0
         for i in range(n_images):
             l = keypoints_by_image[i]
@@ -62,7 +72,16 @@ class BOVHelpers:
                 else:
                     idx = kmeans_ret[old_count + j]
                 self.mega_histogram[i][idx] += 1
+                cluster_saliencies[idx] = np.append(cluster_saliencies[idx], saliency_list[old_count + j])
             old_count += l
+
+        # Calculates the saliency score for every cluster
+        for cluster_idx in range(len(cluster_saliencies)):
+            total_saliency = cluster_saliencies[cluster_idx].sum()
+            mean_saliency = total_saliency / float(cluster_saliencies[cluster_idx].size)
+            entropy_saliency = entropy(cluster_saliencies[cluster_idx] / total_saliency) / np.log(cluster_saliencies[cluster_idx].size)
+            self.saliency_score[cluster_idx] = mean_saliency * entropy_saliency
+
         print "Vocabulary Histogram Generated"
 
     def standardize(self, std=None):
@@ -87,25 +106,35 @@ class BOVHelpers:
 
         """
         vStack = np.array(l[0])
-        i = 0
         for remaining in l:
-            print i
             vStack = np.vstack((vStack, remaining))
-            i += 1
         self.descriptor_vstack = vStack.copy()
         return vStack
 
-    def train(self, train_labels):
+    def train(self, train_labels, num_features=None):
         """
         uses sklearn.svm.SVC classifier (SVM)
 
 
         """
+
+        # Peforms feature selection using the saliency score
+
+        sc_idx = np.argsort(1 - self.saliency_score)
+
+        if num_features is not None:
+            self.feature_selection = sc_idx[0:num_features]
+        else:
+            self.feature_selection = np.arange(self.n_clusters, dtype=int)
+
         print "Training SVM"
         print "Train labels", train_labels
-        self.clf.fit(self.mega_histogram, train_labels)
+        self.clf.fit(self.mega_histogram[:, self.feature_selection], train_labels)
         print self.clf
         print "Training completed"
+
+    def _feature_selection(self):
+        return np.arange(50)
 
     def predict(self, iplist):
         predictions = self.clf.predict(iplist)
