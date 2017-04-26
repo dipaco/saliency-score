@@ -1,11 +1,22 @@
 import cv2
 import numpy as np
+import sys
+import os
+import matlab
 from glob import glob
+from skimage.transform import rescale
 from sklearn.cluster import KMeans
 from sklearn.svm import SVC
 from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import cross_val_score
 from scipy.stats import entropy
 from matplotlib import pyplot as plt
+
+PYSOLR_PATH = 'toolboxes/Ittis_method/saliency-map-master/src/'
+if not PYSOLR_PATH in sys.path:
+    sys.path.append(PYSOLR_PATH)
+
+from saliency_map import SaliencyMap
 
 
 class ImageHelpers:
@@ -22,10 +33,6 @@ class ImageHelpers:
     def features(self, image):
         keypoints, descriptors = self.sift_object.detectAndCompute(image, None)
         return [keypoints, descriptors]
-
-    def saliency(self, image, keypoints):
-        # TODO: Implement this
-        return np.random.rand(len(keypoints), 1)
 
 
 class BOVHelpers:
@@ -111,30 +118,49 @@ class BOVHelpers:
         self.descriptor_vstack = vStack.copy()
         return vStack
 
-    def train(self, train_labels, num_features=None):
+    def train(self, train_labels):
         """
         uses sklearn.svm.SVC classifier (SVM)
 
 
         """
 
-        # Peforms feature selection using the saliency score
+        print "Training SVM with", self.feature_selection.size, "features."
+        #print "Train labels", train_labels
+        self.clf.fit(self.mega_histogram[:, self.feature_selection], train_labels)
+        #print self.clf
+        print "Training completed"
 
+    def saliency_score_feature_selection(self, num_features):
+        """
+        Peforms feature selection using the saliency score
+
+        """
         sc_idx = np.argsort(1 - self.saliency_score)
-
         if num_features is not None:
             self.feature_selection = sc_idx[0:num_features]
         else:
             self.feature_selection = np.arange(self.n_clusters, dtype=int)
 
-        print "Training SVM"
-        print "Train labels", train_labels
-        self.clf.fit(self.mega_histogram[:, self.feature_selection], train_labels)
-        print self.clf
-        print "Training completed"
+    def crossval(self, train_labels, folds=10, num_features=None):
+        """
+        uses sklearn.svm.SVC classifier (SVM) with crossvalidaton
 
-    def _feature_selection(self):
-        return np.arange(50)
+        """
+
+        # Peforms feature selection using the saliency score
+        sc_idx = np.argsort(1 - self.saliency_score)
+        if num_features is not None:
+            self.feature_selection = sc_idx[0:num_features]
+        else:
+            self.feature_selection = np.arange(self.n_clusters, dtype=int)
+
+        print "Training SVM and cross-validating with ", folds, " folds"
+        #print "Train labels", train_labels
+        scores = cross_val_score(self.clf, self.mega_histogram[:, self.feature_selection], train_labels, cv=folds)
+        print "Cross-validation completed: "
+        print np.mean(scores), np.std(scores)
+        return np.array([np.mean(scores), np.std(scores)])
 
     def predict(self, iplist):
         predictions = self.clf.predict(iplist)
@@ -162,7 +188,7 @@ class FileHelpers:
     def __init__(self):
         pass
 
-    def getFiles(self, path):
+    def getFiles(self, path, doing_training, rate=0.6):
         """
         - returns  a dictionary of all files
         having key => value as  objectname => image path
@@ -178,7 +204,15 @@ class FileHelpers:
             print " #### Reading image category ", word, " ##### "
             count_1 = 0
             imlist[word] = []
-            for imagefile in glob(path + word + "/*[!.db]"):
+            all_imagefilenames = glob(path + word + "/*[!.db]")
+
+            p = int(np.floor(len(all_imagefilenames) * rate))
+            if doing_training:
+                all_imagefilenames = all_imagefilenames[:p]
+            else:
+                all_imagefilenames = all_imagefilenames[p:]
+
+            for imagefile in all_imagefilenames:
                 # print "Reading file ", imagefile
                 im = cv2.imread(imagefile, 0)
                 imlist[word].append(im)
@@ -187,3 +221,60 @@ class FileHelpers:
             print " ###", count_1, " ", word, "Images ###"
 
         return [imlist, count]
+
+
+
+
+class SaliencyHelpers:
+    def __init__(self):
+        self._RESULT_FOLDER = 'saliency'
+
+        # trick to call matlab
+        os.system('export DYLD_LIBRARY_PATH=/usr/local/Cellar/python/2.7.9/Frameworks/Python.framework/Versions/2.7/lib/:$DYLD_LIBRARY_PATH')
+        import matlab.engine
+        self.eng = matlab.engine.start_matlab()
+        #self.eng = None
+        self.eng.addpath('.')
+        pass
+
+    def ittiSaliency(self, img, keypoints):
+        sal_map = self._ittiModel(np.stack((img, img, img), 2))
+        return self._extract_saliency(sal_map, keypoints=keypoints)
+
+    def gbvsSaliency(self, img, keypoints):
+
+        # Ensures that the image is larger than 128x128
+        m = np.min(img.shape)
+        scale = 1.0
+        if m < 128:
+            scale = 128.0 / float(m)
+            img = rescale(img, scale=scale)
+
+        sal_map = self._gbvsModel(np.stack((img, img, img), 2))
+        return self._extract_saliency_matlab(sal_map, keypoints=keypoints, scale=scale)
+
+    def _ittiModel(self, img):
+        return SaliencyMap(img).map
+
+    def _gbvsModel(self, img):
+        sal = self.eng.matlab_gbvs(matlab.double(img.tolist()))
+        return sal
+
+    def _extract_saliency_matlab(self, sal_map, keypoints, scale=1.0):
+        sal_points = np.zeros((len(keypoints), 1))
+        i = 0
+        for kp in keypoints:
+            col, row = int(kp.pt[0] * scale), int(kp.pt[1] * scale)
+            sal_points[i] = sal_map[row][col]
+            i += 1
+        return sal_points
+
+    def _extract_saliency(self, sal_map, keypoints):
+        sal_points = np.zeros((len(keypoints), 1))
+        i = 0
+        for kp in keypoints:
+            col, row = int(kp.pt[0]), int(kp.pt[1])
+            sal_points[i] = sal_map[row, col]
+            i += 1
+        return sal_points
+
